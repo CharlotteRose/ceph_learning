@@ -1,0 +1,189 @@
+-----------------------------------------------------------------------------------------------
+GENERAL INFO 
+-----------------------------------------------------------------------------------------------
+- log per placement group - pglog (stores 3 - 10k changes per PG
+- log enteries are set by osd_min_pg_log_enteries and osd_max_logs_entries 
+- max param kicks in when PG is _NOT_ active+clean 
+- min set log sotred whn PG is active+clean
+- clients maintain object IDs & pools 
+    - clients reach out to MONs for copy of the cluster map 
+    - the client presents the object name and pool to librados 
+    - librados computes PG and prmary OSD for data retrieval/storage based on CRUSH algorithm
+    - client connects to the primary OSD for read/write (i/o) ops. 
+    - clients communicate directly with the OSD (ceph-osd daemon)
+- OSDs stores any received data as an object 
+- Object IDs are unique across the entire cluster 
+- OSDs store objects in 3 parts | ID + binary data + metadata
+
+-----------------------------------------------------------------------------------------------
+RECOVERY INFO 
+-----------------------------------------------------------------------------------------------
+- log per placement group - pglog (stores 3 - 10k changes per PG
+- log enteries are set by osd_min_pg_log_enteries and osd_max_logs_entries 
+- max param kicks in when PG is _NOT_ active+clean 
+- min set log sotred whn PG is active+clean
+-----------------------------------------------------------------------------------------------
+WHEN TO USE 
+-----------------------------------------------------------------------------------------------
+- is OSD was down, and is back up (assuming pglog threshhold has not been turned over) 
+-----------------------------------------------------------------------------------------------
+WHAT TO DO 
+-----------------------------------------------------------------------------------------------
+_IF_ the above requirements have been met:
+- use recovery
+_ELSE_
+- use backfill
+-----------------------------------------------------------------------------------------------
+RECOVERY
+-----------------------------------------------------------------------------------------------
+- only new or changed objects are copied 
+- pglog is searched to minimize search time to find objects needing chnage
+- objects flagged as unrecovered block i/o
+- NOTE: the i/o blocking mechanisim is being deprecated and current BZ is out 
+-----------------------------------------------------------------------------------------------
+BACKFILL
+-----------------------------------------------------------------------------------------------
+- only new or changed objects are copied 
+- compares each PG object bit by bit, requiring more time than recovery 
+-----------------------------------------------------------------------------------------------
+FORCING BACKFILL
+-----------------------------------------------------------------------------------------------
+- To avoid i/o blocks, min and max log values can be adjusted in ceph.conf | (osd.yml ?)
+_TESTING IS HIGHLY RECOMMENDED_ 
+-----------------------------------------------------------------------------------------------
+PEERING 
+-----------------------------------------------------------------------------------------------
+- OSDs compare PG states to establish agreeed on state for cluster 
+- OSD leads are determined based on metadata and latest change data recorded per objcect 
+- OSDs peer when a new OSD is introduced (new or previously down) 
+- OSDs block i/o when peering 
+- OSDs mark PGs backfill_wait of recovery_wait 
+    - PGs should eventually move to backfilling or recovering state 
+- OSDs can take a long time to peer 
+    - recovery_deletes flag ????
+-----------------------------------------------------------------------------------------------
+SLOW REQUESTS
+-----------------------------------------------------------------------------------------------
+- slow request alerts  may appeasr in MON logs
+- debug output will note if PG is waiting_on_peering [i/o blocked] or waiting_on_degraded [i/o is block for recovering and waiting objects 
+-----------------------------------------------------------------------------------------------
+STOPPING BACKFILL & RECOVERY 
+-----------------------------------------------------------------------------------------------
+   [user@host]$ ceph osd set nobackfill
+   [user@host]$ ceph osd set no recover 
+   [user@host]$ ceph osd unset nobackfill 
+   [user@host]$ ceph osd unset norecover 
+-----------------------------------------------------------------------------------------------
+NO_REBALANCE 
+-----------------------------------------------------------------------------------------------
+- prevents data movement when PG is degraded (PG is missing data copies >=1 in erroneous location) 
+- allows data movement when PG is marked remapped (PG is missing data copies >=1)
+-----------------------------------------------------------------------------------------------
+UNDERSTANDING BACKFILL AND RECOVERY 
+-----------------------------------------------------------------------------------------------
+- newly identified OSDs are reported (new daemons check in) to the MON to be factored into the CRUSH algorithm/map
+- this tirggers a rebalance to equally distribute data amoung all OSDs marked in 
+- performance can be impacted by object migration between PGs served by new OSDs 
+-----------------------------------------------------------------------------------------------
+THINGS TO KEEP IN MIND 
+-----------------------------------------------------------------------------------------------
+- PGs are distruibuted among OSDs 
+-----------------------------------------------------------------------------------------------
+MONS
+-----------------------------------------------------------------------------------------------
+Keep cluster state map 
+directs i/o between clients and OSDs servign data 
+runs ceph-mon
+-----------------------------------------------------------------------------------------------
+OSDs 
+-----------------------------------------------------------------------------------------------
+Store actual data 
+runs ceph-osd
+-----------------------------------------------------------------------------------------------
+MSDs
+-----------------------------------------------------------------------------------------------
+runs ceph-mds
+used with CephFS
+-----------------------------------------------------------------------------------------------
+RGW 
+-----------------------------------------------------------------------------------------------
+runs ceph-radosgw
+is an interface communicating with librados to serve object data via API
+    S3 - provides Amazon s3 API compatability 
+    Swift - provides Swfit API compataility 
+
+-----------------------------------------------------------------------------------------------
+REPOS 
+-----------------------------------------------------------------------------------------------
+   [user@host]$ subscription-manager repos --disable=*
+   [user@host]$ subscription-manager repos --enabled=rhel-7-server-rpms
+   [user@host]$ subscription-manager repos --enable=rhel-7-server-extras-rpms
+   [user@host]$ yum install yum-utils vim -y 
+   [user@host]$ yum config manager --disable epel
+[MON]
+   [user@host]$ subscription-manager repos --enable=rhel-7-server-rhceph-3-mon-rpms
+[OSD]
+   [user@host]$ subscription-manager repos --enable=rhel-7-server-rhceph-3-osds-rpms
+[MDS, RGW, ANSIBLE ADMIN, CLIENT]
+   [user@host]$ subscription-manager repos --enable=rhel-7-server-rhceph-3-tools-rpms
+
+-----------------------------------------------------------------------------------------------
+NETWORKING 
+-----------------------------------------------------------------------------------------------
+vim /etc/sysconfig/network-scripts/ifcfg-* 
+    BOOTPROTO = none (for static IPs) 
+    ONBOOT = yes
+systemctl enable firewall-cmd 
+^enable^start 
+[MON]
+firewall-cmd --add-port 6789/tcp --permananet 
+firewall-cmd --add-service ceph-mon 
+[OSDs | MGRs | MDS]
+for i in 6800..7300
+    do 
+        firewall-cmd --add-port $i/tcp --permanent 
+    done 
+firewall-cmd --add-service ceph-osd --permanent
+firewall-cmd --add-service ceph-mgr --permanent 
+firewall-cmd --add-service ceph-mds --permanent 
+[RGW] 
+firewall-cmd --add-port 7480/tcp
+firewall-cmd --add-service ceph-radosgw --permanent
+-----------------------------------------------------------------------------------------------
+ANSIBLE CONFIGURATIONS
+----------------------------------------------------------------------------------------------- 
+[ON ADMIN NODE]
+- need root OR sudo access to all nodes in the cluster 
+for i in 1..4
+    do
+        ssh root@server$i
+        adduser ceph-admin 
+        passwd ceph-admin <redhat>
+        cat << EOF >/etc/sudoers.d/ceph-admin; ceph-admin all = (root) NOPASSWD:ALL
+    done
+chmod 0440 /etc/sudoers.d/ceph-admin 
+ssh-keygen 
+for i in 1..4
+    do
+        ssh-copy-id ceph-admin@server$i
+    done
+vim ~/.ssh/config
+    Host server1
+        Hostname serveri
+        User ceph-admin
+    Host server2
+        Hostname server2
+        User ceph-admin
+chmod 600 ~/.ssh/config
+-----------------------------------------------------------------------------------------------
+INSTALLATION
+-----------------------------------------------------------------------------------------------
+[ADMIN NODE]
+yum install ceph-ansible 
+mkdir ~/ceph-ansible-keys
+ln -s /usr/share/ceph-ansible/group_vars /etc/ansible/group_vars
+cd <alt + . > 
+cp group_vars/{all, osds, mons}.yml.sample group_vars/
+    <Modify Params> 
+
+
