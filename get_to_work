@@ -186,4 +186,60 @@ cd <alt + . >
 cp group_vars/{all, osds, mons}.yml.sample group_vars/
     <Modify Params> 
 
+-----------------------------------------------------------------------------------------------
+CRUSH MAPS
+-----------------------------------------------------------------------------------------------
+- contains lists of OSDs, Buckets, rules 
+- OSDs entries in crushmaps are listed under a host node
+- Domain failure (EC or ER - erasure {coding or replicas})
+- OSDs, bucketsm and rules are all required components of the CRUSH algorithm 
+    - A map is considered custom when there is an additional type (bucket) added to the equation. 
+    - A new bucket type, mandates that there be a corressponding root bucket, and rules. 
+
+
+================================================
+RANDOM 
+
+OSD journals use raw volumes on the OSD nodes, and should be configured on a separate device, if possible a fast device such as an SSD, for performance-oriented and/or write-intensive environments.
+
+^ really? is that to say that collocated is not optimal? 
+
+EACH access method (RGW, RBD, CephFS) are all built ontop of librados 
+RGW - apis 
+RBD - librbd - written in python 
+FS - posix whatever 
+
+RBD image is a collection of individual objects stored across the cluster 
+
+
+probs a dumb q - but would need a backing cluster for each access method? IE can you ahve one set of backing OSDs and yet have RBD and RGW access that? 
+
+pools are logical partitions, allowing objects to be stored under a common tag 
+pools are given a set number of hash buckets that are used to group objects together 
+the buckets are called placement groups
+placement groups can be configured according to the type of data and perms level needed when interacting with the objects that will be hashed to a bucket in a pool
+
+every pool has one crush rule 
+
+every object is given a name 
+that name is hashed and the resultant has is used by the crush algorithm to determine which OSD the object will be written to 
+
+
+OSDs store all the physical data. Placement groups hold a series of objects. These objects are hashed into a bucket/group and then mapped to the OSD storing the data in the object 
+
+objects belong to only one PG - thus every object is mapped to exactly on PG 
+all object belonging to a distinct PG will have the same hash result 
+
+every PG has a failure domain (erasure encoding or replica) - and 
+
+When an object is being written to a pool, the client is given the 
+
+
+object name is hashed. that hash is used in the crush algorithm, to determine which PG the object will be mapped to. 
+Clients used the above information and calculations (PG hash mapping) with the cluster map and pg map to determine which OSD the object will be writte to .
+
+OBJECTS ARE HASHED AND ASSIGNED TO PGS - the PGS are mapped to OSDs 
+
+
+
 
